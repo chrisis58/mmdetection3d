@@ -52,39 +52,32 @@ class IterativeRefineDetector(SingleStage3DDetector):
     
     def loss(self, batch_inputs_dict: dict, batch_data_samples: SampleList,
              **kwargs) -> Union[dict, list]:
-        feats_dict = self.extract_feat(batch_inputs_dict)
+        if not self.with_ir:
+            return super(IterativeRefineDetector, self).loss(batch_inputs_dict, batch_data_samples, **kwargs)
 
+        feats_dict = self.extract_feat(batch_inputs_dict)
         losses = dict()
 
-        if self.with_ir:
-            bbox = self.bbox_head(feats_dict, batch_data_samples, **kwargs)
-            bbox_ir, ir_losses = self.ir_head.loss(feats_dict, batch_data_samples, bbox=bbox, **kwargs)
-            _losses = self.bbox_head.loss(feats_dict, batch_data_samples, bbox=bbox_ir, **kwargs)
+        bbox = self.bbox_head(feats_dict, batch_data_samples, **kwargs)
+        bbox_ir, ir_losses = self.ir_head.loss(feats_dict, batch_data_samples, bbox=bbox, **kwargs)
+        _losses = self.bbox_head.loss(feats_dict, batch_data_samples, bbox=bbox_ir, **kwargs)
 
-            losses.update(_losses)
-            losses.update(ir_losses)
-        else:
-            bbox = self.bbox_head(feats_dict, batch_data_samples, **kwargs)
-            losses = self.bbox_head.loss(feats_dict, batch_data_samples, bbox=bbox, **kwargs)
+        losses.update(_losses)
+        losses.update(ir_losses)
 
         return losses
     
     def predict(self, batch_inputs_dict: dict, batch_data_samples: SampleList,
                 **kwargs) -> SampleList:
+        if not self.predicate_with_ir:
+            return super(IterativeRefineDetector, self).predict(batch_inputs_dict, batch_data_samples, **kwargs)
         
         x = self.extract_feat(batch_inputs_dict)
         
-        if self.predicate_with_ir:
-            bbox = self.bbox_head.predict(x, batch_data_samples, **kwargs)
-            results_list = self.ir_head.predict(x, batch_data_samples, bbox=bbox, **kwargs)
+        bbox = self.bbox_head.predict(x, batch_data_samples, **kwargs)
+        results_list = self.ir_head.predict(x, batch_data_samples, bbox=bbox, **kwargs)
 
-            predictions = self.add_pred_to_datasample(batch_data_samples,
-                                                  results_list)
-        else:
-            results_list = self.bbox_head.predict(x, batch_data_samples, **kwargs)
-            predictions = self.add_pred_to_datasample(batch_data_samples,
-                                                  results_list)
-        return predictions
+        return self.add_pred_to_datasample(batch_data_samples, results_list)
     
     def _forward(self,
                  batch_inputs_dict: dict,
