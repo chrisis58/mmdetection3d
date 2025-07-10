@@ -58,7 +58,7 @@ class IterativeRefineDetector(SingleStage3DDetector):
     
     @property
     def predicate_with_ir(self) -> bool:
-        return self.__predicate_with_ir
+        return self.with_ir and self.__predicate_with_ir
     
     def loss(self, 
             batch_inputs_dict: dict,
