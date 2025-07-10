@@ -12,17 +12,16 @@ from .single_stage import SingleStage3DDetector
 @MODELS.register_module()
 class IterativeRefineDetector(SingleStage3DDetector):
 
-    def __init__(
-        self,
-        backbone: ConfigType,
-        adaptor: OptConfigType = None,
-        neck: OptConfigType = None,
-        bbox_head: OptConfigType = None,
-        ir_head: OptConfigType = None,
-        train_cfg: OptConfigType = None,
-        test_cfg: OptConfigType = None,
-        init_cfg: OptMultiConfig = None,
-        data_preprocessor: OptConfigType = None,
+    def __init__(self,
+            backbone: ConfigType,
+            adaptor: OptConfigType = None,
+            neck: OptConfigType = None,
+            bbox_head: OptConfigType = None,
+            ir_head: OptConfigType = None,
+            train_cfg: OptConfigType = None,
+            test_cfg: OptConfigType = None,
+            init_cfg: OptMultiConfig = None,
+            data_preprocessor: OptConfigType = None,
     ) -> None:
         super(IterativeRefineDetector, self).__init__(
             backbone=backbone,
@@ -61,8 +60,11 @@ class IterativeRefineDetector(SingleStage3DDetector):
     def predicate_with_ir(self) -> bool:
         return self.__predicate_with_ir
     
-    def loss(self, batch_inputs_dict: dict, batch_data_samples: SampleList,
-             **kwargs) -> Union[dict, list]:
+    def loss(self, 
+            batch_inputs_dict: dict,
+            batch_data_samples: SampleList,
+            **kwargs
+    ) -> Union[dict, list]:
         if not self.with_ir:
             return super(IterativeRefineDetector, self).loss(batch_inputs_dict, batch_data_samples, **kwargs)
 
@@ -78,8 +80,11 @@ class IterativeRefineDetector(SingleStage3DDetector):
 
         return losses
     
-    def predict(self, batch_inputs_dict: dict, batch_data_samples: SampleList,
-                **kwargs) -> SampleList:
+    def predict(self, 
+            batch_inputs_dict: dict,
+            batch_data_samples: SampleList,
+            **kwargs
+    ) -> SampleList:
         if not self.predicate_with_ir:
             return super(IterativeRefineDetector, self).predict(batch_inputs_dict, batch_data_samples, **kwargs)
         
@@ -91,9 +96,10 @@ class IterativeRefineDetector(SingleStage3DDetector):
         return self.add_pred_to_datasample(batch_data_samples, results_list)
     
     def _forward(self,
-                 batch_inputs_dict: dict,
-                 data_samples: OptSampleList = None,
-                 **kwargs) -> Tuple[List[Tensor], Optional[List[Tensor]]]:
+            batch_inputs_dict: dict,
+            data_samples: OptSampleList = None,
+            **kwargs
+    ) -> Tuple[List[Tensor], Optional[List[Tensor]]]:
         x = self.extract_feat(batch_inputs_dict)
 
         if self.with_ir:
