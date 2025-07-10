@@ -1,5 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from typing import List, Tuple, Union, Optional
+from typing import Dict, List, Tuple, Union, Optional
 
 from torch import Tensor
 
@@ -15,6 +15,7 @@ class IterativeRefineDetector(SingleStage3DDetector):
     def __init__(
         self,
         backbone: ConfigType,
+        adaptor: OptConfigType = None,
         neck: OptConfigType = None,
         bbox_head: OptConfigType = None,
         ir_head: OptConfigType = None,
@@ -31,6 +32,8 @@ class IterativeRefineDetector(SingleStage3DDetector):
             test_cfg=test_cfg,
             init_cfg=init_cfg,
             data_preprocessor=data_preprocessor)
+        
+        self.adaptor = MODELS.build(adaptor) if adaptor is not None else None
 
         if ir_head is not None:
             # update train and test cfg here for now
@@ -41,6 +44,14 @@ class IterativeRefineDetector(SingleStage3DDetector):
             self.__predicate_with_ir = ir_head.get('predicate_with_ir', False)
 
             self.ir_head = MODELS.build(ir_head)
+
+    @property
+    def with_adaptor(self) -> bool:
+        return hasattr(self, 'adaptor') and self.adaptor is not None
+
+    @property
+    def with_neck(self) -> bool:
+        return hasattr(self, 'neck') and self.neck is not None
 
     @property
     def with_ir(self) -> bool:
@@ -94,3 +105,16 @@ class IterativeRefineDetector(SingleStage3DDetector):
             outs = (bbox, None)
 
         return outs
+    
+    def extract_feat(self, 
+            batch_inputs_dict: Dict[str, Tensor],
+    ) -> Union[Tuple[Tensor], Dict[str, Tensor]]:
+        
+        if not self.with_adaptor:
+            return super(IterativeRefineDetector, self).extract_feat(batch_inputs_dict)
+
+        adapted_feat = self.adaptor(batch_inputs_dict)
+        x = self.backbone(adapted_feat)
+        if self.with_neck:
+            x = self.neck(x)
+        return x
