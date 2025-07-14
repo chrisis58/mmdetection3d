@@ -65,18 +65,18 @@ class IterativeRefineDetector(SingleStage3DDetector):
             batch_data_samples: SampleList,
             **kwargs
     ) -> Union[dict, list]:
-        if not self.with_ir:
-            return super(IterativeRefineDetector, self).loss(batch_inputs_dict, batch_data_samples, **kwargs)
-
         feats_dict = self.extract_feat(batch_inputs_dict)
         losses = dict()
 
-        bbox = self.bbox_head(feats_dict, batch_data_samples, **kwargs)
-        bbox_ir, ir_losses = self.ir_head.loss(feats_dict, batch_data_samples, bbox=bbox, **kwargs)
-        _losses = self.bbox_head.loss(feats_dict, batch_data_samples, bbox=bbox_ir, **kwargs)
+        preds_dicts = self.bbox_head(feats_dict, batch_data_samples, **kwargs)
+        if self.with_ir:
+            soft_targets, ir_losses = self.ir_head.loss(preds_dicts, batch_data_samples, **kwargs)
+            _losses = self.bbox_head.loss(preds_dicts, batch_data_samples, soft_targets=soft_targets, **kwargs)
 
-        losses.update(_losses)
-        losses.update(ir_losses)
+            losses.update(_losses)
+            losses.update(ir_losses)
+        else:
+            losses = self.bbox_head.loss(preds_dicts, batch_data_samples, **kwargs)
 
         return losses
     

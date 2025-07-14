@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Union, Dict, Tuple
 
 from torch import Tensor
 
@@ -54,17 +54,32 @@ class IRCenterHead(CenterHead):
             **kwargs)
         
     def loss(self, 
-            pts_feats: List[Tensor],
+            preds_dicts: Tuple[List[dict]],
             batch_data_samples: List[Det3DDataSample],
             soft_targets: Optional[List[Tensor]] = None,
             *args,
             **kwargs
     ) -> Dict[str, Tensor]:
-        if soft_targets is None:
-            return super(IRCenterHead, self).loss(
-                pts_feats, batch_data_samples, *args, **kwargs)
-        
-        # TODO: Implement the loss calculation for IR Center Head with soft targets
-        ...
+
+        batch_gt_instance_3d = []
+        for data_sample in batch_data_samples:
+            batch_gt_instance_3d.append(data_sample.gt_instances_3d)
+        losses = self.loss_by_feat(preds_dicts, batch_gt_instance_3d)
+
+        if soft_targets is not None:
+            soft_targets_losses = self._loss_by_soft_targets(preds_dicts, soft_targets)
+            losses.update(soft_targets_losses)
+
+        return losses
+
+    def _loss_by_soft_targets(
+            self,
+            preds_dicts: Tuple[List[dict]],
+            soft_targets: List[Tensor],
+            *args,
+            **kwargs
+    ) -> Dict[str, Tensor]:
+        """Calculate loss using soft targets."""
+        return dict()
             
             
