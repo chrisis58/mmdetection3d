@@ -22,6 +22,7 @@ class IterativeRefineDetector(SingleStage3DDetector):
             test_cfg: OptConfigType = None,
             init_cfg: OptMultiConfig = None,
             data_preprocessor: OptConfigType = None,
+            predict_with_ir: bool = False
     ) -> None:
         super(IterativeRefineDetector, self).__init__(
             backbone=backbone,
@@ -34,13 +35,13 @@ class IterativeRefineDetector(SingleStage3DDetector):
         
         self.adaptor = MODELS.build(adaptor) if adaptor is not None else None
 
+        self.__predict_with_ir = predict_with_ir
+
         if ir_head is not None:
             # update train and test cfg here for now
             ir_train_cfg = train_cfg.ir_head if train_cfg is not None else None
             ir_head.update(train_cfg=ir_train_cfg)
             ir_head.update(test_cfg=test_cfg.ir_head)
-
-            self.__predicate_with_ir = ir_head.get('predicate_with_ir', False)
 
             self.ir_head = MODELS.build(ir_head)
 
@@ -57,8 +58,8 @@ class IterativeRefineDetector(SingleStage3DDetector):
         return hasattr(self, 'ir_head') and self.ir_head is not None
     
     @property
-    def predicate_with_ir(self) -> bool:
-        return self.with_ir and self.__predicate_with_ir
+    def predict_with_ir(self) -> bool:
+        return self.with_ir and self.__predict_with_ir
     
     def loss(self, 
             batch_inputs_dict: dict,
@@ -85,7 +86,7 @@ class IterativeRefineDetector(SingleStage3DDetector):
             batch_data_samples: SampleList,
             **kwargs
     ) -> SampleList:
-        if not self.predicate_with_ir:
+        if not self.predict_with_ir:
             return super(IterativeRefineDetector, self).predict(batch_inputs_dict, batch_data_samples, **kwargs)
         
         x = self.extract_feat(batch_inputs_dict)
