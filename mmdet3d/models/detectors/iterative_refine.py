@@ -90,8 +90,8 @@ class IterativeRefineDetector(SingleStage3DDetector):
         
         x = self.extract_feat(batch_inputs_dict)
         
-        bbox = self.bbox_head.predict(x, batch_data_samples, **kwargs)
-        results_list = self.ir_head.predict(x, batch_data_samples, bbox=bbox, **kwargs)
+        proposal = self.bbox_head.predict(x, batch_data_samples, **kwargs)
+        results_list = self.ir_head.predict(x, batch_data_samples, proposal=proposal, **kwargs)
 
         return self.add_pred_to_datasample(batch_data_samples, results_list)
     
@@ -103,11 +103,11 @@ class IterativeRefineDetector(SingleStage3DDetector):
         x = self.extract_feat(batch_inputs_dict)
 
         if self.with_ir:
-            bbox = self.bbox_head(x, data_samples, **kwargs)
-            bbox_ir = self.ir_head(x, data_samples, bbox=bbox, **kwargs)
-            outs = (bbox_ir, bbox)
+            proposal = self.bbox_head(x, **kwargs)
+            bbox = self.ir_head(x, proposal=proposal, **kwargs)
+            outs = (bbox, proposal)
         else:
-            bbox = self.bbox_head(x, data_samples, **kwargs)
+            bbox = self.bbox_head(x, **kwargs)
             outs = (bbox, None)
 
         return outs
