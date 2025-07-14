@@ -38,7 +38,7 @@ model = dict(
         upsample_cfg=dict(type='deconv', bias=False),
         use_conv_for_no_stride=True),
     bbox_head=dict(
-        type='CenterHead',
+        type='IRCenterHead',
         in_channels=sum([128, 128, 128]),
         tasks=[
             dict(num_class=1, class_names=['car']),
