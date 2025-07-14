@@ -68,7 +68,7 @@ class IterativeRefineDetector(SingleStage3DDetector):
         feats_dict = self.extract_feat(batch_inputs_dict)
         losses = dict()
 
-        preds_dicts = self.bbox_head(feats_dict, batch_data_samples, **kwargs)
+        preds_dicts = self.bbox_head(feats_dict, **kwargs)
         if self.with_ir:
             soft_targets, ir_losses = self.ir_head.loss(preds_dicts, batch_data_samples, **kwargs)
             _losses = self.bbox_head.loss(preds_dicts, batch_data_samples, soft_targets=soft_targets, **kwargs)
