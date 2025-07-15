@@ -71,7 +71,14 @@ class IterativeRefineDetector(SingleStage3DDetector):
 
         preds_dicts = self.bbox_head(feats_dict, **kwargs)
         if self.with_ir:
-            soft_targets, ir_losses = self.ir_head.loss(preds_dicts, batch_data_samples, **kwargs)
+
+            # TODO: predict 会再次调用 forward，是不是可以减少？
+            proposals = self.bbox_head.predict(feats_dict, batch_data_samples)
+
+            soft_targets = self.ir_head(feats_dict, proposals=proposals, **kwargs)
+
+            ir_losses = self.ir_head.loss(soft_targets, batch_data_samples, **kwargs)
+
             _losses = self.bbox_head.loss(preds_dicts, batch_data_samples, soft_targets=soft_targets, **kwargs)
 
             losses.update(_losses)
