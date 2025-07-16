@@ -51,8 +51,8 @@ class KeypointHead(BaseModule):
             'behavior, init_cfg is not allowed to be set'
         super(KeypointHead, self).__init__(init_cfg=init_cfg, **kwargs)
 
-        assert keypoint_num in extractor_registry.keys, f'Keypoint number {keypoint_num} is not supported. ' \
-            f'Supported keypoint numbers are: {extractor_registry.keys}.'
+        assert keypoint_num in extractor_registry.keys(), f'Keypoint number {keypoint_num} is not supported. ' \
+            f'Supported keypoint numbers are: {extractor_registry.keys()}.'
         self._keypoint_num = keypoint_num
 
         self.train_cfg = train_cfg
