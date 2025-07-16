@@ -1,8 +1,9 @@
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Tuple
 
 import torch
 from torch import nn
 
+from mmdet.models.utils import multi_apply
 from mmengine.structures import InstanceData
 from mmengine.model import BaseModule
 from mmdet3d.registry import MODELS
@@ -88,18 +89,25 @@ class KeypointHead(BaseModule):
     def forward(self, 
             x: List[torch.Tensor],
             proposals: List[InstanceData],
-    ) -> Dict[str, torch.Tensor]:
-        
-        extracted_feats = extractor_registry[self._keypoint_num](self, x, proposals)
-
-        shared_feats = self.fc_layers_share(extracted_feats)
-
-        cls_scores = self.fc_layers_cls(shared_feats)
-        bbox_preds = self.fc_layers_bbox(shared_feats)
+    ) -> Dict:
+        ir_cls_score, ir_bbox_pred = multi_apply(self._forward_single, x[0], proposals)
 
         return dict(
-            ir_cls_scores=cls_scores,
-            ir_bbox_preds=bbox_preds)
+            ir_cls_scores=ir_cls_score,
+            ir_bbox_preds=ir_bbox_pred)
+    
+    def _forward_single(self,
+            feat_map: torch.Tensor,
+            proposal: InstanceData
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        feat = self._extract_feat(feat_map, proposal)
+
+        shared_feat = self.fc_layers_share(feat)
+
+        cls_score = self.fc_layers_cls(shared_feat)
+        bbox_pred = self.fc_layers_bbox(shared_feat)
+
+        return cls_score, bbox_pred
     
     def loss(self,
             preds_dict: Dict[str, torch.Tensor],
@@ -127,35 +135,40 @@ class KeypointHead(BaseModule):
         losses['loss_cls'] = self.loss_cls(cls_scores, gt_labels)
         losses['loss_bbox'] = self.loss_bbox(bbox_preds, gt_bboxes)
         return losses
+    
+    def predict(self,
+            feat_map: torch.Tensor,
+            proposal: InstanceData
+    ) -> List[InstanceData]:
+        ...
+    
+    def _extract_feat(self,
+            feat_map: torch.Tensor,
+            proposal: InstanceData
+    ) -> List[torch.Tensor]:
+        return extractor_registry[self._keypoint_num](self, feat_map, proposal)
 
     @keypoint_extractor(5)
     def _extract_feat_with_5_points(self,
-            x: List[torch.Tensor],
-            proposals: List[InstanceData]
+            feat_map: torch.Tensor,
+            proposal: InstanceData
     ) -> List[torch.Tensor]:
         raise NotImplementedError()
         
     
     @keypoint_extractor(1)
     def _extract_feat_with_1_points(self,
-            x: List[torch.Tensor],
-            proposals: List[InstanceData]
-    ) -> List[torch.Tensor]:
-        extracted_feats = []
+            feat_map: torch.Tensor,
+            proposal: InstanceData
+    ) -> torch.Tensor:
+        bboxes = proposal.bboxes_3d.tensor
 
-        for proposal in proposals:
-            bboxes = proposal.bboxes_3d.tensor
+        points = bboxes[:, :3]
+        points = points.view(points.size(0), -1)
+        
+        xs, ys = self._absl_to_relative(points)
 
-            points = bboxes[:, :3]
-            points = points.view(points.size(0), -1)
-            
-            xs, ys = self._absl_to_relative(points)
-
-            feature = bilinear_interpolate_torch(x, xs, ys)
-
-            extracted_feats.append(feature)
-
-        return torch.stack(extracted_feats, dim=0)
+        return bilinear_interpolate_torch(feat_map, xs, ys)
     
 
     def _absl_to_relative(self, absolute):

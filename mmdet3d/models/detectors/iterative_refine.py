@@ -39,9 +39,9 @@ class IterativeRefineDetector(SingleStage3DDetector):
 
         if ir_head is not None:
             # update train and test cfg here for now
-            ir_train_cfg = train_cfg.ir_head if train_cfg is not None else None
-            ir_head.update(train_cfg=ir_train_cfg)
-            ir_head.update(test_cfg=test_cfg.ir_head)
+            # ir_train_cfg = train_cfg.ir_head if train_cfg is not None else None
+            # ir_head.update(train_cfg=ir_train_cfg)
+            # ir_head.update(test_cfg=test_cfg.ir_head)
 
             self.ir_head = MODELS.build(ir_head)
 

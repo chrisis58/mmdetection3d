@@ -15,3 +15,4 @@ from .test_time_augs import *  # noqa: F401,F403
 from .utils import *  # noqa: F401,F403
 from .voxel_encoders import *  # noqa: F401,F403
 from .adaptors import *
+from .ir_heads import *
