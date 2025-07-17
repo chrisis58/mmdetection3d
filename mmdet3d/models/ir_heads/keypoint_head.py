@@ -7,6 +7,7 @@ from mmdet.models.utils import multi_apply
 from mmengine.structures import InstanceData
 from mmengine.model import BaseModule
 from mmdet3d.registry import MODELS
+from mmdet3d.structures import Det3DDataSample
 
 from ..middle_encoders.voxel_set_abstraction import bilinear_interpolate_torch
 
@@ -89,12 +90,18 @@ class KeypointHead(BaseModule):
     def forward(self, 
             x: List[torch.Tensor],
             proposals: List[InstanceData],
-    ) -> Dict:
+    ) -> List[Dict]:
         ir_cls_score, ir_bbox_pred = multi_apply(self._forward_single, x[0], proposals)
 
-        return dict(
-            ir_cls_scores=ir_cls_score,
-            ir_bbox_preds=ir_bbox_pred)
+        assert len(ir_cls_score) == len(ir_bbox_pred)
+
+        ret = []
+        for i in range(len(ir_cls_score)):
+            ret.append(dict(
+                ir_cls_scores=ir_cls_score[i],
+                ir_bbox_preds=ir_bbox_pred[i]))
+        
+        return ret
     
     def _forward_single(self,
             feat_map: torch.Tensor,
@@ -110,19 +117,16 @@ class KeypointHead(BaseModule):
         return cls_score, bbox_pred
     
     def loss(self,
-            preds_dict: Dict[str, torch.Tensor],
-            batch_data_samples: List[dict]
+            preds_dict: List[Dict[str, torch.Tensor]],
+            batch_data_samples: List[Det3DDataSample]
     ) -> Dict[str, torch.Tensor]:
-        cls_scores = preds_dict['ir_cls_scores']
-        bbox_preds = preds_dict['ir_bbox_preds']
+        
 
-        gt_labels = [data_sample['gt_labels'] for data_sample in batch_data_samples]
-        gt_bboxes = [data_sample['gt_bboxes'] for data_sample in batch_data_samples]
+        batch_gt_instance_3d = [data_sample.gt_instances_3d for data_sample in batch_data_samples]
 
-        gt_labels = torch.stack(gt_labels, dim=0)
-        gt_bboxes = torch.stack(gt_bboxes, dim=0)
+        self._build_targets(batch_gt_instance_3d[0])
 
-        return self._loss(cls_scores, bbox_preds, gt_labels, gt_bboxes)
+        raise NotImplementedError()
     
     def _loss(self, 
             cls_scores: torch.Tensor,
@@ -135,6 +139,35 @@ class KeypointHead(BaseModule):
         losses['loss_cls'] = self.loss_cls(cls_scores, gt_labels)
         losses['loss_bbox'] = self.loss_bbox(bbox_preds, gt_bboxes)
         return losses
+    
+    def _get_targets(self,
+            pred: torch.Tensor
+    ) -> InstanceData:
+        raise NotImplementedError()
+        ...
+        coors = pred[:, :2]
+
+        indexes = (coors[:, 1] * 128).int() + coors[:, 0].int()
+
+
+        ...
+
+    @torch.no_grad()
+    def _build_targets(self, 
+            gt_instance_3d: InstanceData
+    ) -> Dict[int, List[int]]:
+        gt_instance_dict = {}
+
+        center = gt_instance_3d.bboxes_3d.center
+        
+        xs, ys = self._absl_to_relative(center)
+
+        indexes = [int(x) + int(y) * 128 for x, y in zip(xs, ys)]
+
+        for i, index in enumerate(indexes):
+            gt_instance_dict.setdefault(index, []).append(i)
+
+        return gt_instance_dict
     
     def predict(self,
             feat_map: torch.Tensor,
@@ -161,12 +194,9 @@ class KeypointHead(BaseModule):
             feat_map: torch.Tensor,
             proposal: InstanceData
     ) -> torch.Tensor:
-        bboxes = proposal.bboxes_3d.tensor
-
-        points = bboxes[:, :3]
-        points = points.view(points.size(0), -1)
+        center = proposal.bboxes_3d.center
         
-        xs, ys = self._absl_to_relative(points)
+        xs, ys = self._absl_to_relative(center)
 
         return bilinear_interpolate_torch(feat_map, xs, ys)
     
