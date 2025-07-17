@@ -120,7 +120,6 @@ class KeypointHead(BaseModule):
             preds_dict: List[Dict[str, torch.Tensor]],
             batch_data_samples: List[Det3DDataSample]
     ) -> Dict[str, torch.Tensor]:
-        
 
         batch_gt_instance_3d = [data_sample.gt_instances_3d for data_sample in batch_data_samples]
 
@@ -140,18 +139,6 @@ class KeypointHead(BaseModule):
         losses['loss_bbox'] = self.loss_bbox(bbox_preds, gt_bboxes)
         return losses
     
-    def _get_targets(self,
-            pred: torch.Tensor
-    ) -> InstanceData:
-        raise NotImplementedError()
-        ...
-        coors = pred[:, :2]
-
-        indexes = (coors[:, 1] * 128).int() + coors[:, 0].int()
-
-
-        ...
-
     @torch.no_grad()
     def _build_targets(self, 
             gt_instance_3d: InstanceData
