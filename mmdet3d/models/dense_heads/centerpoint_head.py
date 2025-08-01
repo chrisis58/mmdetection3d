@@ -456,12 +456,12 @@ class CenterHead(BaseModule):
             tuple[list[torch.Tensor]]: Tuple of target including
                 the following results in order.
 
-                - list[torch.Tensor]: Heatmap scores.
-                - list[torch.Tensor]: Ground truth boxes.
+                - list[torch.Tensor]: Heatmap scores. (shape: [task, num_classes, H, W])
+                - list[torch.Tensor]: Ground truth boxes. (shape: [task, max_objs, 10])
                 - list[torch.Tensor]: Indexes indicating the position
-                    of the valid boxes.
+                    of the valid boxes. (shape: [task, max_objs])
                 - list[torch.Tensor]: Masks indicating which boxes
-                    are valid.
+                    are valid. (shape: [task, max_objs])
         """
         gt_labels_3d = gt_instances_3d.labels_3d
         gt_bboxes_3d = gt_instances_3d.bboxes_3d
