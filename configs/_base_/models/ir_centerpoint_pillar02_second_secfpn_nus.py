@@ -1,6 +1,6 @@
 voxel_size = [0.2, 0.2, 8]
 model = dict(
-    type='IterativeRefineDetector',
+    type='CenterPoint',
     data_preprocessor=dict(
         type='Det3DDataPreprocessor',
         voxel=True,
@@ -8,20 +8,17 @@ model = dict(
             max_num_points=20,
             voxel_size=voxel_size,
             max_voxels=(30000, 40000))),
-    adaptor=dict(
-        type='VoxelAdaptor',
-        encoder=dict(
-            type='PillarFeatureNet',
-            in_channels=5,
-            feat_channels=[64],
-            with_distance=False,
-            voxel_size=(0.2, 0.2, 8),
-            norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
-            legacy=False),
-        middle_encoder=dict(
-            type='PointPillarsScatter', in_channels=64, output_shape=(512, 512))
-    ),
-    backbone=dict(
+    pts_voxel_encoder=dict(
+        type='PillarFeatureNet',
+        in_channels=5,
+        feat_channels=[64],
+        with_distance=False,
+        voxel_size=(0.2, 0.2, 8),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        legacy=False),
+    pts_middle_encoder=dict(
+        type='PointPillarsScatter', in_channels=64, output_shape=(512, 512)),
+    pts_backbone=dict(
         type='SECOND',
         in_channels=64,
         out_channels=[64, 128, 256],
@@ -29,7 +26,7 @@ model = dict(
         layer_strides=[2, 2, 2],
         norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
         conv_cfg=dict(type='Conv2d', bias=False)),
-    neck=dict(
+    pts_neck=dict(
         type='SECONDFPN',
         in_channels=[64, 128, 256],
         out_channels=[128, 128, 128],
@@ -37,7 +34,7 @@ model = dict(
         norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
         upsample_cfg=dict(type='deconv', bias=False),
         use_conv_for_no_stride=True),
-    bbox_head=dict(
+    pts_bbox_head=dict(
         type='IRCenterHead',
         in_channels=sum([128, 128, 128]),
         tasks=[
@@ -67,24 +64,26 @@ model = dict(
         norm_bbox=True),
     # model training and testing settings
     train_cfg=dict(
-        grid_size=[512, 512, 1],
-        voxel_size=voxel_size,
-        out_size_factor=4,
-        dense_reg=1,
-        gaussian_overlap=0.1,
-        max_objs=500,
-        min_radius=2,
-        code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2]),
+        pts=dict(
+            grid_size=[512, 512, 1],
+            voxel_size=voxel_size,
+            out_size_factor=4,
+            dense_reg=1,
+            gaussian_overlap=0.1,
+            max_objs=500,
+            min_radius=2,
+            code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2])),
     test_cfg=dict(
-        post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
-        max_per_img=500,
-        max_pool_nms=False,
-        min_radius=[4, 12, 10, 1, 0.85, 0.175],
-        score_threshold=0.1,
-        pc_range=[-51.2, -51.2],
-        out_size_factor=4,
-        voxel_size=voxel_size[:2],
-        nms_type='rotate',
-        pre_max_size=1000,
-        post_max_size=83,
-        nms_thr=0.2))
+        pts=dict(
+            post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+            max_per_img=500,
+            max_pool_nms=False,
+            min_radius=[4, 12, 10, 1, 0.85, 0.175],
+            score_threshold=0.1,
+            pc_range=[-51.2, -51.2],
+            out_size_factor=4,
+            voxel_size=voxel_size[:2],
+            nms_type='rotate',
+            pre_max_size=1000,
+            post_max_size=83,
+            nms_thr=0.2)))

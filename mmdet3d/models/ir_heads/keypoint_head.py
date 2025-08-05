@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Callable, Tuple
 
 import torch
-from torch import nn
+from torch import Tensor, nn
 
 from mmdet.models.utils import multi_apply
 from mmengine.structures import InstanceData
@@ -23,11 +23,11 @@ def keypoint_extractor(keypoint_num: int):
 class KeypointHead(BaseModule):
 
     def __init__(self,
-            keypoint_num: int = 5,
+            keypoint_num: int = 1,
             pc_start: List[float] = [-51.2, -51.2],
             voxel_size: List[float] = [0.2, 0.2],
             out_stride: int = 4,
-            in_channels: int = 128,
+            in_channels: int = 384,
             fc_layers_share: dict = dict(
                 fc_channels=[256, 256],
                 output_channels=256,
@@ -40,7 +40,7 @@ class KeypointHead(BaseModule):
                 type='mmdet.CrossEntropyLoss', reduction='mean'),
             fc_layers_bbox: dict = dict(
                 fc_channels=[256, 256],
-                output_channels=7,
+                output_channels=10,
                 dropout_ratio=0.5),
             loss_bbox: dict = dict(
                 type='mmdet.L1Loss', reduction='none', loss_weight=0.25),
@@ -66,7 +66,7 @@ class KeypointHead(BaseModule):
 
         __in_channels = fc_layers_share['output_channels']
         self.fc_layers_share = self._build_fc_layers(
-            input_channels=in_channels * keypoint_num,
+            input_channels=in_channels * keypoint_num + 10,  # 10 is for the proposal features
             fc_channels=fc_layers_share['fc_channels'],
             output_channels=__in_channels,
             dropout_ratio=fc_layers_share.get('dropout_ratio', None))
@@ -88,100 +88,78 @@ class KeypointHead(BaseModule):
         self.loss_bbox = MODELS.build(loss_bbox)
 
     def forward(self, 
-            x: List[torch.Tensor],
-            proposals: List[InstanceData],
-    ) -> List[Dict]:
-        ir_cls_score, ir_bbox_pred = multi_apply(self._forward_single, x[0], proposals)
-
-        assert len(ir_cls_score) == len(ir_bbox_pred)
-
-        ret = []
-        for i in range(len(ir_cls_score)):
-            ret.append(dict(
-                ir_cls_scores=ir_cls_score[i],
-                ir_bbox_preds=ir_bbox_pred[i]))
+            feat_maps: torch.Tensor,
+            proposals: torch.Tensor,
+    ) -> Tensor:
+        """
         
-        return ret
-    
+        :feat_map: Tensor
+            Feature map with shape [batch, channel, height, width].
+            e.g. [4, 384, 128, 128].
+        :proposals: Tensor
+            Proposals with shape [batch, num_proposals, 10].
+            e.g. [4, 500, 10].
+        :return: Tensor
+            Target predictions with shape [batch, num_proposals, 10].
+            e.g. [4, 500, 10].
+        """
+        batch = feat_maps.size(0)
+        assert proposals.size(0) == batch, \
+            f'Batch size of feature map {feat_maps.size(0)} ' \
+            f'and proposals {proposals.size(0)} should be the same.'
+        
+        preds = []
+
+        for i in range(batch):
+            feat_map = feat_maps[i]  # [channel, height, width]
+            proposal = proposals[i]  # [num_proposals, 10]
+
+            pred = self._forward_single(feat_map, proposal)
+            preds.append(pred)
+
+        return torch.stack(preds)
+
     def _forward_single(self,
-            feat_map: torch.Tensor,
-            proposal: InstanceData
+            feat_map: Tensor,
+            proposal: Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        feat = self._extract_feat(feat_map, proposal)
+        feat = self._extract_feat(feat_map, proposal) # [num_proposals, num_keypoints * channels]
+
+        feat = torch.cat([feat, proposal], dim=1)  # [num_proposals, num_keypoints * channels + 10]
 
         shared_feat = self.fc_layers_share(feat)
 
-        cls_score = self.fc_layers_cls(shared_feat)
         bbox_pred = self.fc_layers_bbox(shared_feat)
 
-        return cls_score, bbox_pred
-    
-    def loss(self,
-            preds_dict: List[Dict[str, torch.Tensor]],
-            batch_data_samples: List[Det3DDataSample]
-    ) -> Dict[str, torch.Tensor]:
-
-        batch_gt_instance_3d = [data_sample.gt_instances_3d for data_sample in batch_data_samples]
-
-        self._build_targets(batch_gt_instance_3d[0])
-
-        raise NotImplementedError()
-    
-    def _loss(self, 
-            cls_scores: torch.Tensor,
-            bbox_preds: torch.Tensor,
-            gt_labels: torch.Tensor,
-            gt_bboxes: torch.Tensor,
-            **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        losses = dict()
-        losses['loss_cls'] = self.loss_cls(cls_scores, gt_labels)
-        losses['loss_bbox'] = self.loss_bbox(bbox_preds, gt_bboxes)
-        return losses
-    
-    @torch.no_grad()
-    def _build_targets(self, 
-            gt_instance_3d: InstanceData
-    ) -> Dict[int, List[int]]:
-        gt_instance_dict = {}
-
-        center = gt_instance_3d.bboxes_3d.center
-        
-        xs, ys = self._absl_to_relative(center)
-
-        indexes = [int(x) + int(y) * 128 for x, y in zip(xs, ys)]
-
-        for i, index in enumerate(indexes):
-            gt_instance_dict.setdefault(index, []).append(i)
-
-        return gt_instance_dict
+        return bbox_pred
     
     def predict(self,
             feat_map: torch.Tensor,
-            proposal: InstanceData
+            proposal: torch.Tensor
     ) -> List[InstanceData]:
         ...
     
     def _extract_feat(self,
             feat_map: torch.Tensor,
-            proposal: InstanceData
-    ) -> List[torch.Tensor]:
+            proposal: torch.Tensor
+    ) -> torch.Tensor:
         return extractor_registry[self._keypoint_num](self, feat_map, proposal)
 
     @keypoint_extractor(5)
     def _extract_feat_with_5_points(self,
             feat_map: torch.Tensor,
             proposal: InstanceData
-    ) -> List[torch.Tensor]:
+    ) -> torch.Tensor:
         raise NotImplementedError()
         
     
     @keypoint_extractor(1)
     def _extract_feat_with_1_points(self,
             feat_map: torch.Tensor,
-            proposal: InstanceData
+            proposal: torch.Tensor
     ) -> torch.Tensor:
-        center = proposal.bboxes_3d.center
+        center = proposal[:, :2]  # [batch, 2] 取前2个维度作为中心点
+        feat_map = feat_map.permute(1, 2, 0)  # [height, width, channel]
         
         xs, ys = self._absl_to_relative(center)
 
