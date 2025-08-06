@@ -123,7 +123,7 @@ class IRCenterHead(CenterHead):
                 pred, target_box, bbox_weights, avg_factor=(num + 1e-4))
 
             # 2. soft target loss: pred <-> soft_target
-            soft_target = self.ir_head(pts_feats[0], pred)
+            soft_target = self.ir_head(pts_feats[0], pred, task_id=task_id)
             loss_pred_soft = self.loss_bbox(
                 pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
 
