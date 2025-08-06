@@ -23,7 +23,7 @@ def keypoint_extractor(keypoint_num: int):
 class KeypointHead(BaseModule):
 
     def __init__(self,
-            keypoint_num: int = 1,
+            keypoint_num: int = 5,
             pc_start: List[float] = [-51.2, -51.2],
             voxel_size: List[float] = [0.2, 0.2],
             out_stride: int = 4,
@@ -140,10 +140,48 @@ class KeypointHead(BaseModule):
     @keypoint_extractor(5)
     def _extract_feat_with_5_points(self,
             feat_map: torch.Tensor,
-            proposal: InstanceData
+            proposal: torch.Tensor
     ) -> torch.Tensor:
-        raise NotImplementedError()
-        
+        feat_map = feat_map.permute(1, 2, 0)  # [height, width, channel]
+
+        center = proposal[:, :2]  # [num_proposals, 2]
+
+        l = proposal[:, 3]  # length
+        w = proposal[:, 4]  # width
+
+        sin = proposal[:, 6]
+        cos = proposal[:, 7]
+
+        dx = l / 2
+        dy = w / 2
+        corners = torch.stack([
+            torch.stack([ dx,  dy], dim=1),
+            torch.stack([ dx, -dy], dim=1),
+            torch.stack([-dx, -dy], dim=1),
+            torch.stack([-dx,  dy], dim=1)
+        ], dim=1)  # [num_proposals, 4, 2]
+
+        rot_mat = torch.stack([
+            torch.stack([ cos, -sin], dim=1),
+            torch.stack([ sin,  cos], dim=1)
+        ], dim=2)  # [num_proposals, 2, 2]
+
+        corners_rot = torch.einsum('bni,bij->bnj', corners, rot_mat)  # [num_proposals, 4, 2]
+        corners_abs = corners_rot + center.unsqueeze(1)  # [num_proposals, 4, 2]
+
+        mid_points = (corners_abs + torch.roll(corners_abs, shifts=-1, dims=1)) / 2  # [num_proposals, 4, 2]
+
+        sample_points = torch.cat([center.unsqueeze(1), mid_points], dim=1)  # [num_proposals, 5, 2]
+        xs = sample_points[..., 0]
+        ys = sample_points[..., 1]
+
+        feats = []
+        for i in range(5):
+            feat_i = bilinear_interpolate_torch(feat_map, xs[:, i], ys[:, i])  # [num_proposals, in_channels]
+            feats.append(feat_i)
+        feats = torch.cat(feats, dim=1)  # [num_proposals, in_channels*5]
+
+        return feats
     
     @keypoint_extractor(1)
     def _extract_feat_with_1_points(self,
