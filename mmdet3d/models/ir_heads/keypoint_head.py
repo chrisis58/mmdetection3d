@@ -24,26 +24,16 @@ class KeypointHead(BaseModule):
 
     def __init__(self,
             keypoint_num: int = 5,
-            pc_start: List[float] = [-51.2, -51.2],
-            voxel_size: List[float] = [0.2, 0.2],
             out_stride: int = 4,
-            in_channels: int = 384,
+            in_channels: int = 10,
             fc_layers_share: dict = dict(
                 fc_channels=[256, 256],
                 output_channels=256,
                 dropout_ratio=0.5),
-            fc_layers_cls: dict = dict(
-                fc_channels=[256, 256],
-                output_channels=10,
-                dropout_ratio=0.5),
-            loss_cls: dict = dict(
-                type='mmdet.CrossEntropyLoss', reduction='mean'),
             fc_layers_bbox: dict = dict(
                 fc_channels=[256, 256],
                 output_channels=10,
                 dropout_ratio=0.5),
-            loss_bbox: dict = dict(
-                type='mmdet.L1Loss', reduction='none', loss_weight=0.25),
             tasks: int = 6,
             train_cfg: Optional[dict] = None,
             test_cfg: Optional[dict] = None,
@@ -61,8 +51,6 @@ class KeypointHead(BaseModule):
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
 
-        self._pc_start = pc_start
-        self._voxel_size = voxel_size
         self._out_stride = out_stride
 
         __in_channels = fc_layers_share['output_channels']
@@ -88,6 +76,7 @@ class KeypointHead(BaseModule):
     def forward(self, 
             feat_maps: torch.Tensor,
             proposals: torch.Tensor,
+            center_indexes: torch.Tensor,
             task_id: int = 0,
     ) -> Tensor:
         """
@@ -98,6 +87,12 @@ class KeypointHead(BaseModule):
         :proposals: Tensor
             Proposals with shape [batch, num_proposals, 10].
             e.g. [4, 500, 10].
+        :center_indexes: Tensor
+            Center indexes with shape [batch, num_proposals].
+            e.g. [4, 500].
+        :masks: Tensor
+            Masks with shape [batch, num_proposals].
+            e.g. [4, 500].
         :return: Tensor
             Target predictions with shape [batch, num_proposals, 10].
             e.g. [4, 500, 10].
@@ -112,10 +107,11 @@ class KeypointHead(BaseModule):
         for i in range(batch):
             feat_map = feat_maps[i]  # [channel, height, width]
             proposal = proposals[i]  # [num_proposals, 10]
+            center_index = center_indexes[i]  # [num_proposals]
 
             feat_map = feat_map.to(proposal.device)
 
-            feat = self._extract_feat(feat_map, proposal)
+            feat = self._extract_feat(feat_map, proposal, center_index)
             feat = torch.cat([feat, proposal], dim=1)
 
             shared_feat = self.fc_layers_share[task_id](feat)
@@ -133,18 +129,20 @@ class KeypointHead(BaseModule):
     
     def _extract_feat(self,
             feat_map: torch.Tensor,
-            proposal: torch.Tensor
+            proposal: torch.Tensor,
+            center_index: torch.Tensor
     ) -> torch.Tensor:
-        return extractor_registry[self._keypoint_num](self, feat_map, proposal)
+        return extractor_registry[self._keypoint_num](self, feat_map, proposal, center_index)
 
     @keypoint_extractor(5)
     def _extract_feat_with_5_points(self,
             feat_map: torch.Tensor,
-            proposal: torch.Tensor
+            proposal: torch.Tensor,
+            center_index: torch.Tensor
     ) -> torch.Tensor:
         feat_map = feat_map.permute(1, 2, 0)  # [height, width, channel]
 
-        center = proposal[:, :2]  # [num_proposals, 2]
+        center = self._index_to_absl(center_index, proposal[:, :2])
 
         l = proposal[:, 3]  # length
         w = proposal[:, 4]  # width
@@ -172,8 +170,9 @@ class KeypointHead(BaseModule):
         mid_points = (corners_abs + torch.roll(corners_abs, shifts=-1, dims=1)) / 2  # [num_proposals, 4, 2]
 
         sample_points = torch.cat([center.unsqueeze(1), mid_points], dim=1)  # [num_proposals, 5, 2]
-        xs = sample_points[..., 0]
-        ys = sample_points[..., 1]
+        xs, ys = self._absl_to_index(sample_points.reshape(-1, 2))
+        xs = xs.view(sample_points.shape[0], sample_points.shape[1])
+        ys = ys.view(sample_points.shape[0], sample_points.shape[1])
 
         feats = []
         for i in range(5):
@@ -186,21 +185,59 @@ class KeypointHead(BaseModule):
     @keypoint_extractor(1)
     def _extract_feat_with_1_points(self,
             feat_map: torch.Tensor,
-            proposal: torch.Tensor
+            proposal: torch.Tensor,
+            center_index: torch.Tensor
     ) -> torch.Tensor:
-        center = proposal[:, :2]  # [batch, 2] 取前2个维度作为中心点
         feat_map = feat_map.permute(1, 2, 0)  # [height, width, channel]
-        
-        xs, ys = self._absl_to_relative(center)
+
+        center = self._index_to_absl(center_index, proposal[:, :2])
+        xs, ys = self._absl_to_index(center)
 
         return bilinear_interpolate_torch(feat_map, xs, ys)
+
     
+    def _absl_to_index(self, absolute: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        H, W = self._feature_map_size
+        grid_y = (absolute[..., 1] - self._point_cloud_range[1]) / (self._voxel_size[1] * self._out_stride)
+        grid_x = (absolute[..., 0] - self._point_cloud_range[0]) / (self._voxel_size[0] * self._out_stride)
 
-    def _absl_to_relative(self, absolute):
-        a1 = (absolute[..., 0] - self._pc_start[0]) / self._voxel_size[0] / self._out_stride 
-        a2 = (absolute[..., 1] - self._pc_start[1]) / self._voxel_size[1] / self._out_stride 
+        grid_y = torch.clamp(grid_y, 0, H - 1).to(torch.int32)
+        grid_x = torch.clamp(grid_x, 0, W - 1).to(torch.int32)
 
-        return a1, a2
+        return grid_x, grid_y
+
+    def _index_to_absl(self, center_indexes: torch.Tensor, offset: Optional[torch.Tensor] = None) -> torch.Tensor:
+        H, W = self._feature_map_size
+        grid_y = center_indexes // W + 0.5
+        grid_x = center_indexes % W + 0.5
+
+        if offset is not None:
+            assert offset.shape[-1] == 2, 'Offset must have shape [N, 2].'
+            grid_x = grid_x + offset[..., 0]
+            grid_y = grid_y + offset[..., 1]
+
+        abs_x = grid_x * self._voxel_size[0] * self._out_stride + self._point_cloud_range[0]
+        abs_y = grid_y * self._voxel_size[1] * self._out_stride + self._point_cloud_range[1]
+
+        return torch.stack([abs_x, abs_y], dim=-1)
+    
+    @property
+    def _feature_map_size(self):
+        if self.train_cfg is None or 'grid_size' not in self.train_cfg or 'out_size_factor' not in self.train_cfg:
+            raise ValueError('train_cfg must contain grid_size and out_size_factor.')
+        return [size // self.train_cfg['out_size_factor'] for size in self.train_cfg['grid_size'][:2]]
+
+    @property
+    def _point_cloud_range(self):
+        if self.train_cfg is None or 'point_cloud_range' not in self.train_cfg:
+            raise ValueError('train_cfg must contain point_cloud_range.')
+        return self.train_cfg['point_cloud_range']
+    
+    @property
+    def _voxel_size(self):
+        if self.train_cfg is None or 'voxel_size' not in self.train_cfg:
+            raise ValueError('train_cfg must contain voxel_size.')
+        return self.train_cfg['voxel_size']
 
     def _build_fc_layers(self, 
             input_channels: int,

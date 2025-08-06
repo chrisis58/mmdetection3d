@@ -59,6 +59,7 @@ class IRCenterHead(CenterHead):
             **kwargs)
         
         if ir_head is not None:
+            ir_head['train_cfg'] = train_cfg
             self.ir_head = MODELS.build(ir_head)
     
     def with_ir(self) -> bool:
@@ -111,8 +112,8 @@ class IRCenterHead(CenterHead):
                 dim=1)
             ind = inds[task_id]
             num = masks[task_id].float().sum()
-            pred = preds_dict[0]['anno_box'].permute(0, 2, 3, 1).contiguous()
-            feat_map = pred.view(pred.size(0), -1, pred.size(3))
+            pred_feat_map = preds_dict[0]['anno_box'].permute(0, 2, 3, 1).contiguous()
+            feat_map = pred_feat_map.view(pred_feat_map.size(0), -1, pred_feat_map.size(3))
             pred = self._gather_feat(feat_map, ind)
             mask = masks[task_id].unsqueeze(2).expand_as(target_box).float()
             isnotnan = (~torch.isnan(target_box)).float()
@@ -123,7 +124,11 @@ class IRCenterHead(CenterHead):
                 pred, target_box, bbox_weights, avg_factor=(num + 1e-4))
             
             # soft target <-> gt
-            soft_target = self.ir_head(pts_feats[0], pred, task_id=task_id)
+            soft_target = self.ir_head(
+                pred_feat_map.permute(0, 3, 1, 2),
+                pred,
+                ind,
+                task_id=task_id)
             loss_soft_gt = self.loss_bbox(
                 soft_target, target_box, bbox_weights, avg_factor=(num + 1e-4))
 
