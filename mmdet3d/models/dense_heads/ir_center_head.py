@@ -121,15 +121,17 @@ class IRCenterHead(CenterHead):
             bbox_weights = mask * mask.new_tensor(code_weights)
             loss_bbox = self.loss_bbox(
                 pred, target_box, bbox_weights, avg_factor=(num + 1e-4))
-
-            # 2. soft target loss: pred <-> soft_target
+            
+            # soft target <-> gt
             soft_target = self.ir_head(pts_feats[0], pred, task_id=task_id)
-            loss_pred_soft = self.loss_bbox(
-                pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
-
-            # 3. soft target <-> gt
             loss_soft_gt = self.loss_bbox(
                 soft_target, target_box, bbox_weights, avg_factor=(num + 1e-4))
+
+            # conditional soft target loss: pred <-> soft_target
+            loss_pred_soft = torch.tensor(float('nan'), device=pred.device)
+            if loss_soft_gt.item() < loss_bbox.item() * 1.1:
+                loss_pred_soft = self.loss_bbox(
+                    pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
 
             loss_dict[f'task{task_id}.loss_heatmap'] = loss_heatmap
             loss_dict[f'task{task_id}.loss_bbox'] = loss_bbox
