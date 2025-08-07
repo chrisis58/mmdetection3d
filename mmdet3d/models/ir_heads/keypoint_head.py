@@ -59,7 +59,7 @@ class KeypointHead(BaseModule):
         self.fc_layers_bbox = []
         for i in range(tasks):
             self.fc_layers_share.append(self._build_fc_layers(
-                input_channels=in_channels * keypoint_num + 10,  # 10 is for the proposal features
+                input_channels=(in_channels + 2) * keypoint_num + 10,  # 10 is for the proposal features, 2 for position encoding
                 fc_channels=fc_layers_share['fc_channels'],
                 output_channels=__in_channels,
                 dropout_ratio=fc_layers_share.get('dropout_ratio', None)))
@@ -174,11 +174,21 @@ class KeypointHead(BaseModule):
         xs = xs.view(sample_points.shape[0], sample_points.shape[1])
         ys = ys.view(sample_points.shape[0], sample_points.shape[1])
 
+        H, W = self._feature_map_size
+        norm_x = xs.float() / (W - 1)
+        norm_y = ys.float() / (H - 1)
+        pos_enc = torch.cat([norm_x.unsqueeze(-1), norm_y.unsqueeze(-1)], dim=-1)
+        pos_enc = pos_enc.view(sample_points.shape[0], -1) # [num_proposals, 10]
+
         feats = []
         for i in range(5):
             feat_i = bilinear_interpolate_torch(feat_map, xs[:, i], ys[:, i])  # [num_proposals, in_channels]
-            feats.append(feat_i)
-        feats = torch.cat(feats, dim=1)  # [num_proposals, in_channels*5]
+            # feat_i = self._gather_feat(feat_map, xs[:, i], ys[:, i])  # [num_proposals, in_channels]
+
+            feat_i = torch.cat([feat_i, pos_enc[:, 2 * i: 2 * i + 2]], dim=1)  # [num_proposals, in_channels + 2]
+
+            feats.append(feat_i)  # [num_proposals, in_channels + 2]
+        feats = torch.cat(feats, dim=1)  # [num_proposals, (in_channels + 2) * 5]
 
         return feats
     
@@ -193,8 +203,25 @@ class KeypointHead(BaseModule):
         center = self._index_to_absl(center_index, proposal[:, :2])
         xs, ys = self._absl_to_index(center)
 
-        return bilinear_interpolate_torch(feat_map, xs, ys)
+        H, W = self._feature_map_size
+        norm_x = xs.float() / (W - 1)
+        norm_y = ys.float() / (H - 1)
+        pos_enc = torch.cat([norm_x.unsqueeze(-1), norm_y.unsqueeze(-1)], dim=-1)
+        pos_enc = pos_enc.view(center.shape[0], -1)
 
+        feat = bilinear_interpolate_torch(feat_map, xs, ys)
+        # feat = self._gather_feat(feat_map, xs, ys)  # [num_proposals, in_channels]
+        feat = torch.cat([feat, pos_enc], dim=1)  # [num_proposals, in_channels + 2]
+
+        return feat
+    
+    def _gather_feat(self, feat: torch.Tensor, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        H, W, C = feat.shape
+
+        x = torch.clamp(x, 0, W - 1)
+        y = torch.clamp(y, 0, H - 1)
+
+        return feat[y, x]  # [num_proposals, channel]
     
     def _absl_to_index(self, absolute: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         H, W = self._feature_map_size
