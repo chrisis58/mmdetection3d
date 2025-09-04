@@ -96,6 +96,10 @@ class IRCenterHead(CenterHead):
     ) -> Dict[str, Tensor]:
         """Calculate loss using soft targets."""
         heatmaps, anno_boxes, inds, masks = self.get_targets(batch_gt_instance_3d)
+
+        # TODO: find a better way to get the shared features
+        shared_feat = self.shared_conv(pts_feats[0])
+
         loss_dict = dict()
         for task_id, preds_dict in enumerate(preds_dicts):
             preds_dict[0]['heatmap'] = preds_dict[0]['heatmap'].sigmoid()
@@ -125,7 +129,7 @@ class IRCenterHead(CenterHead):
             
             # soft target <-> gt
             soft_target = self.ir_head(
-                pred_feat_map.permute(0, 3, 1, 2),
+                shared_feat,
                 pred,
                 ind,
                 task_id=task_id)
