@@ -25,13 +25,13 @@ class KeypointHead(BaseModule):
     def __init__(self,
             keypoint_num: int = 5,
             out_stride: int = 4,
-            in_channels: int = 10,
+            in_channels: int = 64,
             fc_layers_share: dict = dict(
-                fc_channels=[256, 256],
-                output_channels=256,
+                fc_channels=[512, 1024, 2048, 4096, 4096],
+                output_channels=4096,
                 dropout_ratio=0.5),
             fc_layers_bbox: dict = dict(
-                fc_channels=[256, 256],
+                fc_channels=[4096, 2048, 1024, 512, 256],
                 output_channels=10,
                 dropout_ratio=0.5),
             tasks: int = 6,
