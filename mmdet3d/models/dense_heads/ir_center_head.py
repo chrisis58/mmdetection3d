@@ -6,6 +6,7 @@ import torch
 from mmdet3d.registry import MODELS
 from mmdet3d.structures import Det3DDataSample
 from mmengine.structures import InstanceData
+from mmdet3d.models.utils import (clip_sigmoid)
 
 from .centerpoint_head import CenterHead
 
@@ -102,23 +103,24 @@ class IRCenterHead(CenterHead):
 
         loss_dict = dict()
         for task_id, preds_dict in enumerate(preds_dicts):
-            preds_dict[0]['heatmap'] = preds_dict[0]['heatmap'].sigmoid()
+            preds_dict[0]['heatmap'] = clip_sigmoid(preds_dict[0]['heatmap'])
             num_pos = heatmaps[task_id].eq(1).float().sum().item()
             loss_heatmap = self.loss_cls(
                 preds_dict[0]['heatmap'],
                 heatmaps[task_id],
                 avg_factor=max(num_pos, 1))
             target_box = anno_boxes[task_id]
+            # reconstruct the anno_box from multiple reg heads
             preds_dict[0]['anno_box'] = torch.cat(
                 (preds_dict[0]['reg'], preds_dict[0]['height'],
-                preds_dict[0]['dim'], preds_dict[0]['rot'],
-                preds_dict[0]['vel']),
+                 preds_dict[0]['dim'], preds_dict[0]['rot'],
+                 preds_dict[0]['vel']),
                 dim=1)
             ind = inds[task_id]
             num = masks[task_id].float().sum()
-            pred_feat_map = preds_dict[0]['anno_box'].permute(0, 2, 3, 1).contiguous()
-            feat_map = pred_feat_map.view(pred_feat_map.size(0), -1, pred_feat_map.size(3))
-            pred = self._gather_feat(feat_map, ind)
+            pred = preds_dict[0]['anno_box'].permute(0, 2, 3, 1).contiguous()
+            pred = pred.view(pred.size(0), -1, pred.size(3))
+            pred = self._gather_feat(pred, ind)
             mask = masks[task_id].unsqueeze(2).expand_as(target_box).float()
             isnotnan = (~torch.isnan(target_box)).float()
             mask *= isnotnan
@@ -137,8 +139,10 @@ class IRCenterHead(CenterHead):
                 soft_target, target_box, bbox_weights, avg_factor=(num + 1e-4))
 
             # conditional soft target loss: pred <-> soft_target
-            loss_pred_soft = torch.tensor(float('nan'), device=pred.device)
-            if loss_soft_gt.item() < loss_bbox.item() * 1.1:
+            loss_pred_soft = torch.tensor(0.0, device=pred.device)
+            with torch.no_grad():
+                should_train_soft = (loss_soft_gt < loss_bbox * 1.1)
+            if should_train_soft:
                 loss_pred_soft = self.loss_bbox(
                     pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
 
