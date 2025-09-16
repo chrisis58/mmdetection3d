@@ -73,7 +73,6 @@ class IRCenterHead(CenterHead):
         return hasattr(self, 'ir_head') and self.ir_head is not None
     
     def set_epoch(self, epoch: int) -> None:
-        print(f'Set epoch to {epoch} in IRCenterHead.')
         self._epoch = epoch
 
     def loss(self, 
@@ -152,7 +151,6 @@ class IRCenterHead(CenterHead):
             loss_pred_soft = torch.tensor(0.0, device=pred.device)
             with torch.no_grad():
                 should_train_soft = (self._epoch >= self._warmup_epochs and loss_soft_gt < loss_bbox * 1.1)
-                print(f'Epoch {self._epoch}, {loss_bbox}-{loss_soft_gt}, should_train_soft: {should_train_soft}')
             if should_train_soft:
                 loss_pred_soft = self.loss_bbox(
                     pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
