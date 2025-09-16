@@ -87,3 +87,7 @@ model = dict(
             pre_max_size=1000,
             post_max_size=83,
             nms_thr=0.2)))
+
+custom_hooks = [
+    dict(type='mmdet.engine.hooks.SetEpochInfoHook')
+]

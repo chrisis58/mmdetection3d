@@ -63,3 +63,8 @@ class CenterPoint(MVXTwoStageDetector):
                              img_neck, pts_neck, pts_bbox_head, img_roi_head,
                              img_rpn_head, train_cfg, test_cfg, init_cfg,
                              data_preprocessor, **kwargs)
+    
+    def set_epoch(self, epoch):
+        if hasattr(self, 'pts_bbox_head') and self.pts_bbox_head is not None:
+            if hasattr(self.pts_bbox_head, 'set_epoch'):
+                self.pts_bbox_head.set_epoch(epoch)
