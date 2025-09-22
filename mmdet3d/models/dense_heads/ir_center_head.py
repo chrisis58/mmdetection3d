@@ -30,6 +30,9 @@ class IRCenterHead(CenterHead):
             ir_head: Optional[dict] = dict(
                 type='KeypointHead',
             ),
+            loss_ir: Optional[dict] = dict(
+                type='mmdet.SmoothL1Loss', beta=1.0 / 9.0, reduction='mean', loss_weight=0.15
+            ),
             share_conv_channel: int = 64,
             num_heatmap_convs: int = 2,
             conv_cfg: dict = dict(type='Conv2d'),
@@ -152,7 +155,7 @@ class IRCenterHead(CenterHead):
             with torch.no_grad():
                 should_train_soft = (self._epoch >= self._warmup_epochs and loss_soft_gt < loss_bbox)
             if should_train_soft:
-                loss_pred_soft = self.loss_bbox(
+                loss_pred_soft = self.loss_ir(
                     pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
 
             loss_dict[f'task{task_id}.loss_heatmap'] = loss_heatmap
