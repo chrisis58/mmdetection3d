@@ -150,7 +150,7 @@ class IRCenterHead(CenterHead):
             # conditional soft target loss: pred <-> soft_target
             loss_pred_soft = torch.tensor(0.0, device=pred.device)
             with torch.no_grad():
-                should_train_soft = (self._epoch >= self._warmup_epochs and loss_soft_gt < loss_bbox * 1.1)
+                should_train_soft = (self._epoch >= self._warmup_epochs and loss_soft_gt < loss_bbox)
             if should_train_soft:
                 loss_pred_soft = self.loss_bbox(
                     pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))
