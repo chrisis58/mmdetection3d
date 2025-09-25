@@ -32,7 +32,7 @@ class KeypointHeadAttention(BaseModule):
                      fc_channels=[1024, 512],
                      output_channels=10,
                      dropout_ratio=0.5),
-                 tasks: int = 6,
+                 tasks: List[dict] = [dict(num_class=1)],
                  transformer_nhead: int = 8,
                  transformer_num_layers: int = 2,
                  transformer_dim_feedforward: int = 512,
@@ -49,6 +49,7 @@ class KeypointHeadAttention(BaseModule):
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         self._out_stride = out_stride
+        self.tasks_cfg = tasks
         
         
         _d_model_in = in_channels + 2
@@ -56,34 +57,29 @@ class KeypointHeadAttention(BaseModule):
 
         self.positional_encoding = nn.Embedding(keypoint_num, d_model)
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=transformer_nhead,
+            d_model=d_model, nhead=transformer_nhead,
             dim_feedforward=transformer_dim_feedforward,
             dropout=transformer_dropout,
-            activation='relu',
-            batch_first=True
-        )
+            activation='relu', batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=transformer_num_layers
-        )
+            encoder_layer, num_layers=transformer_num_layers)
         
-        fc_share_input_channels = d_model + 10
-        bbox_input_channels = fc_layers_share['output_channels']
-
         self.fc_layers_share = nn.ModuleList()
         self.fc_layers_bbox = nn.ModuleList()
-        for i in range(tasks):
+        for task in self.tasks_cfg:
+            num_class = task['num_class']
+            fc_share_input_channels = d_model + 10 + num_class
             self.fc_layers_share.append(self._build_fc_layers(
                 input_channels=fc_share_input_channels, **fc_layers_share))
             self.fc_layers_bbox.append(self._build_fc_layers(
-                input_channels=bbox_input_channels, **fc_layers_bbox))
+                input_channels=fc_layers_share['output_channels'], **fc_layers_bbox))
 
     def forward(self, 
                 feat_maps: torch.Tensor,
                 proposals: torch.Tensor,
                 center_indexes: torch.Tensor,
                 task_id: int = 0,
+                scores: Optional[torch.Tensor] = None
                 ) -> Tensor:
         B, N, _ = proposals.shape
         
@@ -97,19 +93,21 @@ class KeypointHeadAttention(BaseModule):
         pos_ids = torch.arange(K, device=transformer_input.device).unsqueeze(0)
         pos_embed = self.positional_encoding(pos_ids)
         transformer_input = transformer_input + pos_embed
-
         transformer_output = self.transformer_encoder(transformer_input)
-
         agg_feat = transformer_output.mean(dim=1)
 
         proposal_feats_reshaped = proposals.view(B * N, 10)
-        feats_reshaped = torch.cat([agg_feat, proposal_feats_reshaped], dim=1)
+        
+        if scores is not None:
+            scores_reshaped = scores.view(B * N, -1)
+        else:
+            num_class = self.tasks_cfg[task_id]['num_class']
+            scores_reshaped = torch.zeros((B * N, num_class), device=agg_feat.device)
+        feats_reshaped = torch.cat([agg_feat, proposal_feats_reshaped, scores_reshaped], dim=1)
 
         shared_feat = self.fc_layers_share[task_id](feats_reshaped)
         bbox_pred_reshaped = self.fc_layers_bbox[task_id](shared_feat)
-
         bbox_pred = bbox_pred_reshaped.view(B, N, -1)
-
         return bbox_pred
 
     def _extract_feat(self, feat_maps: torch.Tensor, proposals: torch.Tensor, center_indexes: torch.Tensor) -> torch.Tensor:

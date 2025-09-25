@@ -31,7 +31,7 @@ class IRCenterHead(CenterHead):
                 type='KeypointHead',
             ),
             loss_ir: Optional[dict] = dict(
-                type='mmdet.SmoothL1Loss', beta=1.0 / 9.0, reduction='mean', loss_weight=0.15
+                type='mmdet.SmoothL1Loss', beta=1.0 / 9.0, reduction='mean', loss_weight=0.2
             ),
             share_conv_channel: int = 64,
             num_heatmap_convs: int = 2,
@@ -65,7 +65,11 @@ class IRCenterHead(CenterHead):
         
         if ir_head is not None:
             ir_head['train_cfg'] = train_cfg
+            ir_head['tasks'] = tasks
             self.ir_head = MODELS.build(ir_head)
+        
+        if loss_ir is not None:
+            self.loss_ir = MODELS.build(loss_ir)
         
         self._epoch = 0
 
@@ -115,7 +119,10 @@ class IRCenterHead(CenterHead):
 
         loss_dict = dict()
         for task_id, preds_dict in enumerate(preds_dicts):
-            preds_dict[0]['heatmap'] = clip_sigmoid(preds_dict[0]['heatmap'])
+            heatmap = preds_dict[0]['heatmap']
+            scores = self._gather_feat(heatmap.permute(0, 2, 3, 1).contiguous().view(heatmap.size(0), -1, heatmap.size(1)), inds[task_id])
+
+            preds_dict[0]['heatmap'] = clip_sigmoid(heatmap)
             num_pos = heatmaps[task_id].eq(1).float().sum().item()
             loss_heatmap = self.loss_cls(
                 preds_dict[0]['heatmap'],
@@ -146,7 +153,8 @@ class IRCenterHead(CenterHead):
                 shared_feat,
                 pred,
                 ind,
-                task_id=task_id)
+                task_id=task_id,
+                scores=scores.detach())
             loss_soft_gt = self.loss_bbox(
                 soft_target, target_box, bbox_weights, avg_factor=(num + 1e-4))
 
