@@ -151,7 +151,7 @@ class IRCenterHead(CenterHead):
             # soft target <-> gt
             soft_target = self.ir_head(
                 shared_feat,
-                pred,
+                pred.detach(),
                 ind,
                 task_id=task_id,
                 scores=scores.detach())
