@@ -71,8 +71,9 @@ class KeypointHeadAttention(BaseModule):
             fc_share_input_channels = d_model + 10 + num_class
             self.fc_layers_share.append(self._build_fc_layers(
                 input_channels=fc_share_input_channels, **fc_layers_share))
+            # initialize the last layer to zero
             self.fc_layers_bbox.append(self._build_fc_layers(
-                input_channels=fc_layers_share['output_channels'], **fc_layers_bbox))
+                input_channels=fc_layers_share['output_channels'], **fc_layers_bbox, init_last_layer_zero=True))
 
     def forward(self, 
                 feat_maps: torch.Tensor,
@@ -106,9 +107,13 @@ class KeypointHeadAttention(BaseModule):
         feats_reshaped = torch.cat([agg_feat, proposal_feats_reshaped, scores_reshaped], dim=1)
 
         shared_feat = self.fc_layers_share[task_id](feats_reshaped)
-        bbox_pred_reshaped = self.fc_layers_bbox[task_id](shared_feat)
-        bbox_pred = bbox_pred_reshaped.view(B, N, -1)
-        return bbox_pred
+
+        # add residual connection
+        bbox_pred_offset = self.fc_layers_bbox[task_id](shared_feat)
+        bbox_pred_offset = bbox_pred_offset.view(B, N, -1)
+        refined_proposals = proposals + bbox_pred_offset
+
+        return refined_proposals
 
     def _extract_feat(self, feat_maps: torch.Tensor, proposals: torch.Tensor, center_indexes: torch.Tensor) -> torch.Tensor:
         return extractor_registry[self._keypoint_num](self, feat_maps, proposals, center_indexes)
@@ -179,7 +184,13 @@ class KeypointHeadAttention(BaseModule):
             raise ValueError('train_cfg must contain voxel_size.')
         return cfg['voxel_size']
 
-    def _build_fc_layers(self, input_channels: int, fc_channels: List[int], output_channels: int, dropout_ratio: Optional[float] = None) -> nn.Sequential:
+    def _build_fc_layers(self, 
+        input_channels: int, 
+        fc_channels: List[int], 
+        output_channels: int, 
+        dropout_ratio: Optional[float] = None,
+        init_last_layer_zero: bool = False
+    ) -> nn.Sequential:
         fc_layers = []
         c_in = input_channels
         for k, c_out in enumerate(fc_channels):
@@ -191,5 +202,13 @@ class KeypointHeadAttention(BaseModule):
             c_in = c_out
             if k == 0 and dropout_ratio is not None and dropout_ratio > 0:
                 fc_layers.append(nn.Dropout(p=dropout_ratio))
-        fc_layers.append(nn.Linear(c_in, output_channels, bias=True))
+        
+        final_layer = nn.Linear(c_in, output_channels, bias=True)
+
+        if init_last_layer_zero:
+            nn.init.constant_(final_layer.weight, 0)
+            nn.init.constant_(final_layer.bias, 0)
+
+        fc_layers.append(final_layer)
+        
         return nn.Sequential(*fc_layers)
