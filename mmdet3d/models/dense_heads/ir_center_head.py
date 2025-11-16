@@ -17,6 +17,7 @@ class IRCenterHead(CenterHead):
             in_channels: Union[List[int], int] = [128],
             warmup_epochs: int = 3,
             tasks: Optional[List[dict]] = None,
+            refine_tasks: Optional[List[int]] = None,
             bbox_coder: Optional[dict] = None,
             common_heads: dict = dict(),
             loss_cls: dict = dict(
@@ -66,12 +67,14 @@ class IRCenterHead(CenterHead):
         if ir_head is not None:
             ir_head['train_cfg'] = train_cfg
             ir_head['tasks'] = tasks
+            ir_head['refine_tasks'] = refine_tasks
             self.ir_head = MODELS.build(ir_head)
         
         if loss_ir is not None:
             self.loss_ir = MODELS.build(loss_ir)
         
         self._epoch = 0
+        self._refine_tasks = refine_tasks
 
         assert warmup_epochs >= 0, 'warmup_epochs must be non-negative.'
         self._warmup_epochs = warmup_epochs
@@ -161,7 +164,7 @@ class IRCenterHead(CenterHead):
             # conditional soft target loss: pred <-> soft_target
             loss_pred_soft = torch.tensor(0.0, device=pred.device)
             with torch.no_grad():
-                should_train_soft = (self._epoch >= self._warmup_epochs and loss_soft_gt < loss_bbox)
+                should_train_soft = (self._epoch >= self._warmup_epochs and loss_soft_gt < loss_bbox and (self._refine_tasks is None or task_id in self._refine_tasks))
             if should_train_soft:
                 loss_pred_soft = self.loss_ir(
                     pred, soft_target.detach(), bbox_weights, avg_factor=(num + 1e-4))

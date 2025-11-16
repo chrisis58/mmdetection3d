@@ -33,6 +33,7 @@ class KeypointHeadAttention(BaseModule):
                      output_channels=10,
                      dropout_ratio=0.5),
                  tasks: List[dict] = [dict(num_class=1)],
+                 refine_tasks: Optional[List[int]] = None,
                  transformer_nhead: int = 8,
                  transformer_num_layers: int = 2,
                  transformer_dim_feedforward: int = 512,
@@ -51,6 +52,7 @@ class KeypointHeadAttention(BaseModule):
         self._out_stride = out_stride
         self.tasks_cfg = tasks
         
+        self.refine_tasks = refine_tasks
         
         _d_model_in = in_channels + 2
         self.input_proj = nn.Linear(_d_model_in, d_model)
@@ -66,7 +68,14 @@ class KeypointHeadAttention(BaseModule):
         
         self.fc_layers_share = nn.ModuleList()
         self.fc_layers_bbox = nn.ModuleList()
-        for task in self.tasks_cfg:
+        for task_id, task in enumerate(self.tasks_cfg):
+
+            if self.refine_tasks is not None and task_id not in self.refine_tasks:
+                # skip refinement for this task
+                self.fc_layers_share.append(nn.Identity())
+                self.fc_layers_bbox.append(nn.Identity())
+                continue
+
             num_class = task['num_class']
             fc_share_input_channels = d_model + 10 + num_class
             self.fc_layers_share.append(self._build_fc_layers(
@@ -82,6 +91,10 @@ class KeypointHeadAttention(BaseModule):
                 task_id: int = 0,
                 scores: Optional[torch.Tensor] = None
                 ) -> Tensor:
+        if self.refine_tasks is not None and task_id not in self.refine_tasks:
+            # skip refinement for this task
+            return proposals
+
         B, N, _ = proposals.shape
         
         keypoint_feats = self._extract_feat(feat_maps, proposals, center_indexes)

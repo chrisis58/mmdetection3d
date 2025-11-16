@@ -21,7 +21,8 @@ model = dict(
         voxel_layer=dict(point_cloud_range=point_cloud_range)),
     pts_bbox_head=dict(
         bbox_coder=dict(pc_range=point_cloud_range[:2]),
-        ir_head=dict(type='KeypointHeadAttention')),
+        ir_head=dict(type='KeypointHeadAttention'),
+        refine_tasks=[1, 2]), # only refine big objects like 'truck', 'construction_vehicle', 'bus', 'trailer'
     # model training and testing settings
     train_cfg=dict(pts=dict(point_cloud_range=point_cloud_range)),
     test_cfg=dict(pts=dict(pc_range=point_cloud_range[:2])))
