@@ -116,22 +116,17 @@ test_pipeline = [
         pad_empty_sweeps=True,
         remove_close=True,
         backend_args=backend_args),
+    # --- 之前在 MultiScaleFlipAug3D 里的预处理移到这里 ---
+    # GlobalRotScaleTrans 和 RandomFlip3D 在测试时如果不做增强通常是不需要的
+    # 除非你有特定的归一化需求。这里保留 PointsRangeFilter 即可。
     dict(
-        type='MultiScaleFlipAug3D',
-        img_scale=(1333, 800),
-        pts_scale_ratio=1,
-        flip=False,
-        transforms=[
-            dict(
-                type='GlobalRotScaleTrans',
-                rot_range=[0, 0],
-                scale_ratio_range=[1., 1.],
-                translation_std=[0, 0, 0]),
-            dict(type='RandomFlip3D'),
-            dict(
-                type='PointsRangeFilter', point_cloud_range=point_cloud_range)
-        ]),
-    dict(type='Pack3DDetInputs', keys=['points'])
+        type='PointsRangeFilter', 
+        point_cloud_range=point_cloud_range),
+    # -----------------------------------------------------
+    dict(
+        type='Pack3DDetInputs', 
+        keys=['points'] # 确保包含 points 以便可视化
+    )
 ]
 
 train_dataloader = dict(

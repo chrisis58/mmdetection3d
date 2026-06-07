@@ -1,7 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import open3d
 import argparse
 import os
 import os.path as osp
+
+os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'
 
 from mmengine.config import Config, ConfigDict, DictAction
 from mmengine.registry import RUNNERS
