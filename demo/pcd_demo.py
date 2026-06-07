@@ -3,6 +3,19 @@ import logging
 import os
 from argparse import ArgumentParser
 
+import open3d
+import torch
+_original_load = torch.load
+
+def _hack_torch_load(*args, **kwargs):
+    # 如果调用方没有指定 weights_only，强制设为 False
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+
+torch.load = _hack_torch_load
+os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'
+
 from mmengine.logging import print_log
 
 from mmdet3d.apis import LidarDet3DInferencer

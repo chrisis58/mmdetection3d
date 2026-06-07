@@ -20,7 +20,9 @@ model = dict(
     data_preprocessor=dict(
         voxel_layer=dict(point_cloud_range=point_cloud_range)),
     pts_voxel_encoder=dict(point_cloud_range=point_cloud_range),
-    pts_bbox_head=dict(bbox_coder=dict(pc_range=point_cloud_range[:2])),
+    pts_bbox_head=dict(
+        bbox_coder=dict(pc_range=point_cloud_range[:2]),
+        warmup_epochs=0),  # disable warmup
     # model training and testing settings
     train_cfg=dict(pts=dict(point_cloud_range=point_cloud_range)),
     test_cfg=dict(pts=dict(pc_range=point_cloud_range[:2])))
