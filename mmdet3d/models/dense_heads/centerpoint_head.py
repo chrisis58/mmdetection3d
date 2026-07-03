@@ -313,6 +313,13 @@ class CenterHead(BaseModule):
         self.num_classes = num_classes
         self.norm_bbox = norm_bbox
 
+        # Compute bbox code size and ordered regression head keys from common_heads.
+        # E.g. common_heads = {'reg': (2,2), 'height': (1,2), 'dim': (3,2), 'rot': (2,2), 'vel': (2,2)}
+        # -> _bbox_code_size = 10, _reg_heads_keys = ['reg', 'height', 'dim', 'rot', 'vel']
+        # For KITTI (no vel): _bbox_code_size = 8, _reg_heads_keys = ['reg', 'height', 'dim', 'rot']
+        self._reg_heads_keys = list(common_heads.keys())
+        self._bbox_code_size = sum(head[0] for head in common_heads.values())
+
         self.loss_cls = MODELS.build(loss_cls)
         self.loss_bbox = MODELS.build(loss_bbox)
         self.bbox_coder = TASK_UTILS.build(bbox_coder)
@@ -504,10 +511,10 @@ class CenterHead(BaseModule):
 
         for idx, task_head in enumerate(self.task_heads):
             heatmap = gt_bboxes_3d.new_zeros(
-                (len(self.class_names[idx]), feature_map_size[1],
-                 feature_map_size[0]))
+                (len(self.class_names[idx]), feature_map_size[0],
+                 feature_map_size[1]))
 
-            anno_box = gt_bboxes_3d.new_zeros((max_objs, 10),
+            anno_box = gt_bboxes_3d.new_zeros((max_objs, self._bbox_code_size),
                                               dtype=torch.float32)
 
             ind = gt_labels_3d.new_zeros((max_objs), dtype=torch.int64)
@@ -559,25 +566,34 @@ class CenterHead(BaseModule):
                     new_idx = k
                     x, y = center_int[0], center_int[1]
 
-                    assert (y * feature_map_size[0] + x <
+                    assert (y * feature_map_size[1] + x <
                             feature_map_size[0] * feature_map_size[1])
 
-                    ind[new_idx] = y * feature_map_size[0] + x
+                    ind[new_idx] = y * feature_map_size[1] + x
                     mask[new_idx] = 1
-                    # TODO: support other outdoor dataset
-                    vx, vy = task_boxes[idx][k][7:]
                     rot = task_boxes[idx][k][6]
                     box_dim = task_boxes[idx][k][3:6]
                     if self.norm_bbox:
                         box_dim = box_dim.log()
-                    anno_box[new_idx] = torch.cat([
-                        center - torch.tensor([x, y], device=device),
-                        z.unsqueeze(0), box_dim,
-                        torch.sin(rot).unsqueeze(0),
-                        torch.cos(rot).unsqueeze(0),
-                        vx.unsqueeze(0),
-                        vy.unsqueeze(0)
-                    ])
+
+                    reg_offset = center - torch.tensor([x, y], device=device)
+                    if 'vel' in self._reg_heads_keys:
+                        vx, vy = task_boxes[idx][k][7:]
+                        anno_box[new_idx] = torch.cat([
+                            reg_offset,
+                            z.unsqueeze(0), box_dim,
+                            torch.sin(rot).unsqueeze(0),
+                            torch.cos(rot).unsqueeze(0),
+                            vx.unsqueeze(0),
+                            vy.unsqueeze(0)
+                        ])
+                    else:
+                        anno_box[new_idx] = torch.cat([
+                            reg_offset,
+                            z.unsqueeze(0), box_dim,
+                            torch.sin(rot).unsqueeze(0),
+                            torch.cos(rot).unsqueeze(0)
+                        ])
 
             heatmaps.append(heatmap)
             anno_boxes.append(anno_box)
@@ -637,11 +653,8 @@ class CenterHead(BaseModule):
                 avg_factor=max(num_pos, 1))
             target_box = anno_boxes[task_id]
             # reconstruct the anno_box from multiple reg heads
-            preds_dict[0]['anno_box'] = torch.cat(
-                (preds_dict[0]['reg'], preds_dict[0]['height'],
-                 preds_dict[0]['dim'], preds_dict[0]['rot'],
-                 preds_dict[0]['vel']),
-                dim=1)
+            pred_parts = [preds_dict[0][key] for key in self._reg_heads_keys]
+            preds_dict[0]['anno_box'] = torch.cat(pred_parts, dim=1)
 
             # Regression loss for dimension, offset, height, rotation
             ind = inds[task_id]

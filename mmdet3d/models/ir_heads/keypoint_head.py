@@ -36,6 +36,8 @@ class KeypointHead(BaseModule):
                 output_channels=10,
                 dropout_ratio=0.5),
             tasks: int = 6,
+            bbox_code_size: int = 10,
+            refine_tasks: Optional[List[int]] = None,
             train_cfg: Optional[dict] = None,
             test_cfg: Optional[dict] = None,
             init_cfg: Optional[dict] = None,
@@ -54,13 +56,20 @@ class KeypointHead(BaseModule):
 
         self._out_stride = out_stride
 
+        self._bbox_code_size = bbox_code_size
+
+        # Support both int (number of tasks) and list (task configs from IRCenterHead)
+        self._refine_tasks = refine_tasks
+        if isinstance(tasks, (list, tuple)):
+            tasks = len(tasks)
+
         __in_channels = fc_layers_share['output_channels']
 
         self.fc_layers_share = []
         self.fc_layers_bbox = []
         for i in range(tasks):
             self.fc_layers_share.append(self._build_fc_layers(
-                input_channels=(in_channels + 2) * keypoint_num + 10,  # 10 is for the proposal features, 2 for position encoding
+                input_channels=(in_channels + 2) * keypoint_num + self._bbox_code_size,  # bbox_code_size is for the proposal features, 2 for position encoding
                 fc_channels=fc_layers_share['fc_channels'],
                 output_channels=__in_channels,
                 dropout_ratio=fc_layers_share.get('dropout_ratio', None)))
@@ -68,7 +77,7 @@ class KeypointHead(BaseModule):
             self.fc_layers_bbox.append(self._build_fc_layers(
                 input_channels=__in_channels,
                 fc_channels=fc_layers_bbox['fc_channels'],
-                output_channels=fc_layers_bbox['output_channels'],
+                output_channels=self._bbox_code_size,
                 dropout_ratio=fc_layers_bbox.get('dropout_ratio', None)))
         
         self.fc_layers_share = nn.ModuleList(self.fc_layers_share)

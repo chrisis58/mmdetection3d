@@ -34,6 +34,7 @@ class KeypointHeadAttention(BaseModule):
                      dropout_ratio=0.5),
                  tasks: List[dict] = [dict(num_class=1)],
                  refine_tasks: Optional[List[int]] = None,
+                 bbox_code_size: int = 10,
                  transformer_nhead: int = 8,
                  transformer_num_layers: int = 2,
                  transformer_dim_feedforward: int = 512,
@@ -51,8 +52,9 @@ class KeypointHeadAttention(BaseModule):
         self.test_cfg = test_cfg
         self._out_stride = out_stride
         self.tasks_cfg = tasks
-        
+
         self.refine_tasks = refine_tasks
+        self._bbox_code_size = bbox_code_size
         
         _d_model_in = in_channels + 2
         self.input_proj = nn.Linear(_d_model_in, d_model)
@@ -77,12 +79,16 @@ class KeypointHeadAttention(BaseModule):
                 continue
 
             num_class = task['num_class']
-            fc_share_input_channels = d_model + 10 + num_class
+            fc_share_input_channels = d_model + self._bbox_code_size + num_class
             self.fc_layers_share.append(self._build_fc_layers(
                 input_channels=fc_share_input_channels, **fc_layers_share))
             # initialize the last layer to zero
             self.fc_layers_bbox.append(self._build_fc_layers(
-                input_channels=fc_layers_share['output_channels'], **fc_layers_bbox, init_last_layer_zero=True))
+                input_channels=fc_layers_share['output_channels'],
+                output_channels=self._bbox_code_size,
+                fc_channels=fc_layers_bbox['fc_channels'],
+                dropout_ratio=fc_layers_bbox.get('dropout_ratio', None),
+                init_last_layer_zero=True))
 
     def forward(self, 
                 feat_maps: torch.Tensor,
@@ -110,7 +116,7 @@ class KeypointHeadAttention(BaseModule):
         transformer_output = self.transformer_encoder(transformer_input)
         agg_feat = transformer_output.mean(dim=1)
 
-        proposal_feats_reshaped = proposals.view(B * N, 10)
+        proposal_feats_reshaped = proposals.view(B * N, self._bbox_code_size)
         
         if scores is not None:
             scores_reshaped = scores.view(B * N, -1)

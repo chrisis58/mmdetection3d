@@ -68,6 +68,7 @@ class IRCenterHead(CenterHead):
             ir_head['train_cfg'] = train_cfg
             ir_head['tasks'] = tasks
             ir_head['refine_tasks'] = refine_tasks
+            ir_head['bbox_code_size'] = self._bbox_code_size
             self.ir_head = MODELS.build(ir_head)
         
         if loss_ir is not None:
@@ -133,11 +134,8 @@ class IRCenterHead(CenterHead):
                 avg_factor=max(num_pos, 1))
             target_box = anno_boxes[task_id]
             # reconstruct the anno_box from multiple reg heads
-            preds_dict[0]['anno_box'] = torch.cat(
-                (preds_dict[0]['reg'], preds_dict[0]['height'],
-                 preds_dict[0]['dim'], preds_dict[0]['rot'],
-                 preds_dict[0]['vel']),
-                dim=1)
+            pred_parts = [preds_dict[0][key] for key in self._reg_heads_keys]
+            preds_dict[0]['anno_box'] = torch.cat(pred_parts, dim=1)
             ind = inds[task_id]
             num = masks[task_id].float().sum()
             pred = preds_dict[0]['anno_box'].permute(0, 2, 3, 1).contiguous()
