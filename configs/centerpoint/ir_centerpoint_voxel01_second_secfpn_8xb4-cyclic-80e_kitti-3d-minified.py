@@ -1,7 +1,7 @@
 _base_ = [
     '../_base_/datasets/kitti-3d-3class.py',
     '../_base_/models/ir_centerpoint_voxel01_second_secfpn_kitti.py',
-    '../_base_/schedules/cyclic-20e.py', '../_base_/default_runtime.py'
+    '../_base_/schedules/cyclic-80e.py', '../_base_/default_runtime.py'
 ]
 
 # If point cloud range is changed, the models should also change their point
