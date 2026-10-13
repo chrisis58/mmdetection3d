@@ -69,6 +69,8 @@ class IRCenterHead(CenterHead):
             ir_head['tasks'] = tasks
             ir_head['refine_tasks'] = refine_tasks
             ir_head['bbox_code_size'] = self._bbox_code_size
+            if ir_head.get('type') == 'KeypointHeadAttention':
+                ir_head['norm_bbox'] = self.norm_bbox
             self.ir_head = MODELS.build(ir_head)
         
         if loss_ir is not None:

@@ -16,7 +16,10 @@ model = dict(
         voxel_layer=dict(point_cloud_range=point_cloud_range)),
     pts_bbox_head=dict(
         bbox_coder=dict(pc_range=point_cloud_range[:2]),
-        ir_head=dict(type='KeypointHeadAttention'),
+        ir_head=dict(
+            type='KeypointHeadAttention',
+            context_radius=1.0,
+            context_tasks=[0, 1]),  # Pedestrian and Cyclist
         warmup_epochs=0),  # disable warmup for overfitting test
     # model training and testing settings
     train_cfg=dict(pts=dict(point_cloud_range=point_cloud_range)),

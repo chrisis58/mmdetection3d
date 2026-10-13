@@ -1,3 +1,4 @@
+import math
 from typing import List, Dict, Optional, Callable, Tuple
 
 import torch
@@ -21,7 +22,7 @@ class KeypointHeadAttention(BaseModule):
 
     def __init__(self,
                  keypoint_num: int = 5,
-                 out_stride: int = 4,
+                 out_stride: Optional[int] = None,
                  in_channels: int = 64,
                  d_model: int = 256,
                  fc_layers_share: dict = dict(
@@ -39,6 +40,9 @@ class KeypointHeadAttention(BaseModule):
                  transformer_num_layers: int = 2,
                  transformer_dim_feedforward: int = 512,
                  transformer_dropout: float = 0.1,
+                 norm_bbox: bool = True,
+                 context_radius: Optional[float] = None,
+                 context_tasks: Optional[List[int]] = None,
                  train_cfg: Optional[dict] = None,
                  test_cfg: Optional[dict] = None,
                  init_cfg: Optional[dict] = None,
@@ -50,8 +54,28 @@ class KeypointHeadAttention(BaseModule):
         self._keypoint_num = keypoint_num
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
+        if out_stride is None:
+            out_stride = (train_cfg.get('out_size_factor', 4)
+                          if train_cfg is not None else 4)
         self._out_stride = out_stride
         self.tasks_cfg = tasks
+        self.norm_bbox = norm_bbox
+        if context_radius is not None and (
+                not math.isfinite(context_radius) or context_radius <= 0):
+            raise ValueError('context_radius must be finite and positive.')
+        self.context_radius = context_radius
+        self.context_tasks = context_tasks
+        # Eight BEV directions on a circle; the radius is in meters, not
+        # proportional to the proposal dimensions. Diagonals have unit norm.
+        diagonal = 2 ** -0.5
+        context_offsets = torch.tensor([
+            [1., 0.], [diagonal, diagonal], [0., 1.],
+            [-diagonal, diagonal], [-1., 0.],
+            [-diagonal, -diagonal], [0., -1.],
+            [diagonal, -diagonal],
+        ])
+        self.register_buffer('_context_offsets', context_offsets,
+                             persistent=False)
 
         self.refine_tasks = refine_tasks
         self._bbox_code_size = bbox_code_size
@@ -59,7 +83,9 @@ class KeypointHeadAttention(BaseModule):
         _d_model_in = in_channels + 2
         self.input_proj = nn.Linear(_d_model_in, d_model)
 
-        self.positional_encoding = nn.Embedding(keypoint_num, d_model)
+        num_tokens = keypoint_num + (8 if context_radius is not None else 0)
+        # Context points use their own token IDs, distinct from box points.
+        self.positional_encoding = nn.Embedding(num_tokens, d_model)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=transformer_nhead,
             dim_feedforward=transformer_dim_feedforward,
@@ -103,7 +129,8 @@ class KeypointHeadAttention(BaseModule):
 
         B, N, _ = proposals.shape
         
-        keypoint_feats = self._extract_feat(feat_maps, proposals, center_indexes)
+        keypoint_feats = self._extract_feat(
+            feat_maps, proposals, center_indexes, task_id=task_id)
         keypoint_feats = self.input_proj(keypoint_feats)
 
         _, _, K, C_feat = keypoint_feats.shape
@@ -134,24 +161,50 @@ class KeypointHeadAttention(BaseModule):
 
         return refined_proposals
 
-    def _extract_feat(self, feat_maps: torch.Tensor, proposals: torch.Tensor, center_indexes: torch.Tensor) -> torch.Tensor:
-        return extractor_registry[self._keypoint_num](self, feat_maps, proposals, center_indexes)
+    def _extract_feat(self, feat_maps: torch.Tensor, proposals: torch.Tensor,
+                      center_indexes: torch.Tensor,
+                      task_id: int = 0) -> torch.Tensor:
+        box_feats = extractor_registry[self._keypoint_num](
+            self, feat_maps, proposals, center_indexes)
+        if self.context_radius is None or (
+                self.context_tasks is not None
+                and task_id not in self.context_tasks):
+            return box_feats
+        center = self._index_to_absl(
+            center_indexes, proposals[..., :2], feat_maps.shape[-2:])
+        context_points = (center.unsqueeze(2)
+                          + self.context_radius * self._context_offsets.to(center))
+        context_feats = self._sample_features(feat_maps, context_points)
+        return torch.cat([box_feats, context_feats], dim=2)
 
     @keypoint_extractor(5)
     def _extract_feat_with_5_points(self, feat_maps: torch.Tensor, proposals: torch.Tensor, center_indexs: torch.Tensor) -> torch.Tensor:
-        B, C, H, W = feat_maps.shape
-        N = proposals.shape[1]
-        center = self._index_to_absl(center_indexs, proposals[..., :2])
-        l, w, sin, cos = proposals[..., 3], proposals[..., 4], proposals[..., 6], proposals[..., 7]
+        center = self._index_to_absl(
+            center_indexs, proposals[..., :2], feat_maps.shape[-2:])
+        # Proposals and output residuals stay in the detector's encoded space.
+        # Only the sampling geometry needs physical dimensions in meters.
+        dimensions = proposals[..., 3:6]
+        if self.norm_bbox:
+            dimensions = dimensions.exp()
+        l, w = dimensions[..., 0], dimensions[..., 1]
+        rotation = F.normalize(proposals[..., 6:8], dim=-1)
+        sin, cos = rotation[..., 0], rotation[..., 1]
         dx, dy = l / 2, w / 2
         corners = torch.stack([torch.stack([dx, dy],-1), torch.stack([dx,-dy],-1), torch.stack([-dx,-dy],-1), torch.stack([-dx, dy],-1)], dim=2)
         rot_mat = torch.stack([torch.stack([cos,-sin],-1), torch.stack([sin, cos],-1)], dim=2)
-        corners_rot = corners @ rot_mat
+        corners_rot = corners @ rot_mat.transpose(-1, -2)
         corners_abs = corners_rot + center.unsqueeze(2)
         mid_points = (corners_abs + torch.roll(corners_abs, shifts=-1, dims=2)) / 2
         sample_points_abs = torch.cat([center.unsqueeze(2), mid_points], dim=2)
-        xs, ys = self._absl_to_index(sample_points_abs)
-        norm_xs, norm_ys = (xs / (W - 1 + 1e-6)) * 2 - 1, (ys / (H - 1 + 1e-6)) * 2 - 1
+        return self._sample_features(feat_maps, sample_points_abs)
+
+    def _sample_features(self, feat_maps: torch.Tensor,
+                         sample_points_abs: torch.Tensor) -> torch.Tensor:
+        H, W = feat_maps.shape[-2:]
+        xs, ys = self._absl_to_index(sample_points_abs, (H, W))
+        # Pixel-center coordinates for grid_sample(align_corners=False).
+        norm_xs = 2 * (xs + 0.5) / W - 1
+        norm_ys = 2 * (ys + 0.5) / H - 1
         grid = torch.stack([norm_xs, norm_ys], dim=-1)
         sampled_feats = F.grid_sample(feat_maps, grid, mode='bilinear', padding_mode='border', align_corners=False).permute(0, 2, 3, 1)
         pos_enc_x, pos_enc_y = xs / (W - 1 + 1e-6), ys / (H - 1 + 1e-6)
@@ -159,8 +212,12 @@ class KeypointHeadAttention(BaseModule):
         final_feats = torch.cat([sampled_feats, pos_enc], dim=-1)
         return final_feats
 
-    def _absl_to_index(self, absolute: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        H, W = self._feature_map_size
+    def _absl_to_index(
+            self, absolute: torch.Tensor,
+            feature_map_size: Optional[Tuple[int, int]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        H, W = (self._feature_map_size if feature_map_size is None
+                else feature_map_size)
         vs_y, vs_x = self._voxel_size[1], self._voxel_size[0]
         pcr_y, pcr_x = self._point_cloud_range[1], self._point_cloud_range[0]
         
@@ -171,10 +228,16 @@ class KeypointHeadAttention(BaseModule):
         grid_x = torch.clamp(grid_x, 0, W - 1)
         return grid_x, grid_y
 
-    def _index_to_absl(self, center_indexes: torch.Tensor, offset: Optional[torch.Tensor] = None) -> torch.Tensor:
-        H, W = self._feature_map_size
-        grid_y = center_indexes // W + 0.5
-        grid_x = center_indexes % W + 0.5
+    def _index_to_absl(
+            self, center_indexes: torch.Tensor,
+            offset: Optional[torch.Tensor] = None,
+            feature_map_size: Optional[Tuple[int, int]] = None
+    ) -> torch.Tensor:
+        H, W = (self._feature_map_size if feature_map_size is None
+                else feature_map_size)
+        dtype = offset.dtype if offset is not None else torch.float32
+        grid_y = (center_indexes // W).to(dtype)
+        grid_x = (center_indexes % W).to(dtype)
         if offset is not None:
             grid_x += offset[..., 0]
             grid_y += offset[..., 1]

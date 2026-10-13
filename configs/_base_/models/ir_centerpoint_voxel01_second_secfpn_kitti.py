@@ -38,10 +38,11 @@ model = dict(
     pts_bbox_head=dict(
         type='IRCenterHead',
         in_channels=sum([256, 256]),
+        # Task order must match the dataset's numeric label order.
         tasks=[
-            dict(num_class=1, class_names=['Car']),
             dict(num_class=1, class_names=['Pedestrian']),
             dict(num_class=1, class_names=['Cyclist']),
+            dict(num_class=1, class_names=['Car']),
         ],
         common_heads=dict(
             reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2)),
@@ -76,7 +77,7 @@ model = dict(
             post_center_limit_range=[-10, -50, -10.0, 80.4, 50, 8.0],
             max_per_img=500,
             max_pool_nms=False,
-            min_radius=[4, 2, 2],
+            min_radius=[2, 2, 4],
             score_threshold=0.1,
             out_size_factor=8,
             voxel_size=voxel_size[:2],

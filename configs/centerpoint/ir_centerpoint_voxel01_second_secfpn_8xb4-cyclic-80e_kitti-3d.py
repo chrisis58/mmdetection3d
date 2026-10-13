@@ -17,8 +17,11 @@ model = dict(
         voxel_layer=dict(point_cloud_range=point_cloud_range)),
     pts_bbox_head=dict(
         bbox_coder=dict(pc_range=point_cloud_range[:2]),
-        ir_head=dict(type='KeypointHeadAttention'),
-        refine_tasks=[0]),  # only refine large objects (Car)
+        ir_head=dict(
+            type='KeypointHeadAttention',
+            context_radius=1.0,  # meters, independent of box dimensions
+            context_tasks=[0, 1]),  # Pedestrian and Cyclist
+        refine_tasks=[0, 1, 2]),
     # model training and testing settings
     train_cfg=dict(pts=dict(point_cloud_range=point_cloud_range)),
     test_cfg=dict(pts=dict(pc_range=point_cloud_range[:2])))
